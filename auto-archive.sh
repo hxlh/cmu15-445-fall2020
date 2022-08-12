@@ -75,7 +75,8 @@ case $1 in
     src/include/storage/index/b_plus_tree.h \
     src/storage/index/b_plus_tree.cpp \
     src/include/storage/index/index_iterator.h \
-    src/storage/index/index_iterator.cpp
+    src/storage/index/index_iterator.cpp \
+    src/include/storage/page/tmp_tuple_page.h
   ;;
   2)
     zip $out -urq \
@@ -92,7 +93,8 @@ case $1 in
     src/include/storage/index/b_plus_tree.h \
     src/storage/index/b_plus_tree.cpp \
     src/include/storage/index/index_iterator.h \
-    src/storage/index/index_iterator.cpp
+    src/storage/index/index_iterator.cpp \
+    src/include/storage/page/tmp_tuple_page.h
   ;;
   1)
     zip $out -urq \
