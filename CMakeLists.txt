@@ -33,7 +33,7 @@ enable_testing()
 
 # clang-format
 find_program(CLANG_FORMAT_BIN
-        NAMES clang-format clang-format-8
+        NAMES clang-format clang-format-12
         HINTS ${BUSTUB_CLANG_SEARCH_PATH})
 if ("${CLANG_FORMAT_BIN}" STREQUAL "CLANG_FORMAT_BIN-NOTFOUND")
     message(WARNING "BusTub/main couldn't find clang-format.")
@@ -43,7 +43,7 @@ endif()
 
 # clang-tidy
 find_program(CLANG_TIDY_BIN
-        NAMES clang-tidy clang-tidy-8
+        NAMES clang-tidy clang-tidy-12
         HINTS ${BUSTUB_CLANG_SEARCH_PATH})
 if ("${CLANG_TIDY_BIN}" STREQUAL "CLANG_TIDY_BIN-NOTFOUND")
     message(WARNING "BusTub/main couldn't find clang-tidy.")
