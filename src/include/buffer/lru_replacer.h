@@ -60,10 +60,10 @@ class LRUReplacer : public Replacer {
 
  private:
   // TODO(student): implement me!
-  std::mutex mut;                                                           // 信号量
-  std::list<frame_id_t> LRUlist;                                            // 双向链表，存放frame_id_t
-  std::unordered_map<frame_id_t, std::list<frame_id_t>::iterator> LRUhash;  // 哈希表，frame_id_t->链表迭代器
-  size_t max_size;                                                          // 最大容量
+  std::mutex latch_;
+  std::list<frame_id_t> lru_list_;
+  std::unordered_map<frame_id_t, std::list<frame_id_t>::iterator> lru_hash_;
+  size_t num_pages_;
 };
 
 }  // namespace bustub

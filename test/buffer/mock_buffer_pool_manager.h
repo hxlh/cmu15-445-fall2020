@@ -27,7 +27,11 @@ class MockBufferPoolManager : public BufferPoolManager {
   using bufferpool_callback_fn = void (MockBufferPoolManager::*)(enum CallbackType type, FuncType func_type);
 
   MockBufferPoolManager(size_t pool_size, DiskManager *disk_manager, LogManager *log_manager = nullptr)
-      : BufferPoolManager(pool_size, disk_manager, log_manager) {}
+      : BufferPoolManager(pool_size, disk_manager, log_manager) {
+    pool_size_ = pool_size;
+    pages_ = nullptr;
+    replacer_ = nullptr;
+  }
 
   void counter_callback(enum CallbackType type, FuncType func_type) {
     if (type == CallbackType::BEFORE) {

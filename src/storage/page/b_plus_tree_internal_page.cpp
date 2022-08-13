@@ -138,7 +138,7 @@ int B_PLUS_TREE_INTERNAL_PAGE_TYPE::InsertNodeAfter(const ValueType &old_value, 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveHalfTo(BPlusTreeInternalPage *recipient,
                                                 BufferPoolManager *buffer_pool_manager) {
-  auto start = GetMinSize();
+  auto start = GetMinSize() + 1;
   auto item = &array[start];
   auto size = GetSize() - start;
   recipient->CopyNFrom(item, size, buffer_pool_manager);

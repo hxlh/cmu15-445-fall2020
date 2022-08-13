@@ -43,17 +43,14 @@ bool BPLUSTREE_TYPE::IsEmpty() const { return root_page_id_ == INVALID_PAGE_ID; 
 INDEX_TEMPLATE_ARGUMENTS
 bool BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result, Transaction *transaction) {
   Page *page = FindLeafPage(key, false);
-  page->RLatch();
+
   if (page == nullptr) {
-    page->RUnlatch();
-    buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
     return false;
   }
   LeafPage *leaf = reinterpret_cast<LeafPage *>(page->GetData());
   ValueType value;
   bool found = leaf->Lookup(key, &value, comparator_);
 
-  page->RUnlatch();
   buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
 
   if (found) {
@@ -129,13 +126,14 @@ bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, 
   }
 
   int newsz = leaf_page->Insert(key, value, comparator_);
-  // leaf已满需要分裂
+  // leaf已满需要分裂,leaf page 需要>=来保证与internal page有相同的key数量
   if (newsz >= leaf_page->GetMaxSize()) {
+    LOG_INFO("leaf已满需要分裂\n");
     LeafPage *new_leaf_page = Split(leaf_page);
     InsertIntoParent(leaf_page, new_leaf_page->KeyAt(0), new_leaf_page, transaction);
     buffer_pool_manager_->UnpinPage(new_leaf_page->GetPageId(), true);
   }
-
+  LOG_INFO("MaxSize() %d GetSize() %d\n", leaf_page->GetMaxSize(), leaf_page->GetSize());
   buffer_pool_manager_->UnpinPage(leaf_page->GetPageId(), true);
   return true;
 }
@@ -207,15 +205,20 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node, const KeyType &ke
     buffer_pool_manager_->UnpinPage(new_root_page->GetPageId(), true);
     return;
   }
+
   // 非根节点，找父节点插入,满了则递归分裂
   Page *ppage = buffer_pool_manager_->FetchPage(old_node->GetParentPageId());
   assert(ppage != nullptr);
 
   InternalPage *pnode = reinterpret_cast<InternalPage *>(ppage->GetData());
   int newsz = pnode->InsertNodeAfter(old_node->GetPageId(), key, new_node->GetPageId());
-  // 递归分裂
+  // 给new_node添加parent_id
+  new_node->SetParentPageId(pnode->GetPageId());
+  // 递归分裂，internal page本身第一位的key为空占一个size，因此不用>=
   if (newsz > pnode->GetMaxSize()) {
+    // BUG wait fix 2022年8月13日00:20:55
     InternalPage *new_pnode = Split(pnode);
+    // Internal Page key(1)才是第一个值
     InsertIntoParent(pnode, new_pnode->KeyAt(0), new_pnode, transaction);
     buffer_pool_manager_->UnpinPage(new_pnode->GetPageId(), true);
   }
@@ -334,10 +337,11 @@ Page *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key, bool leftMost) {
   if (IsEmpty()) {
     return nullptr;
   }
+
   Page *page = buffer_pool_manager_->FetchPage(root_page_id_);
   assert(page != nullptr);
-  page->RLatch();
   auto node = reinterpret_cast<BPlusTreePage *>(page->GetData());
+
   while (!node->IsLeafPage()) {
     InternalPage *in_node = reinterpret_cast<InternalPage *>(node);
     auto next_pid = INVALID_PAGE_ID;
@@ -349,15 +353,14 @@ Page *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key, bool leftMost) {
     }
     assert(next_pid != INVALID_PAGE_ID);
 
-    page->RUnlatch();
     buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
     // 下一轮
     page = buffer_pool_manager_->FetchPage(next_pid);
     assert(page != nullptr);
-    page->RLatch();
+
     node = reinterpret_cast<BPlusTreePage *>(page->GetData());
   }
-  page->RUnlatch();
+
   return page;
 }
 
