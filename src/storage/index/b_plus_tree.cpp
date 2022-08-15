@@ -128,12 +128,10 @@ bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, 
   int newsz = leaf_page->Insert(key, value, comparator_);
   // leaf已满需要分裂,leaf page 需要>=来保证与internal page有相同的key数量
   if (newsz >= leaf_page->GetMaxSize()) {
-    LOG_INFO("leaf已满需要分裂\n");
     LeafPage *new_leaf_page = Split(leaf_page);
     InsertIntoParent(leaf_page, new_leaf_page->KeyAt(0), new_leaf_page, transaction);
     buffer_pool_manager_->UnpinPage(new_leaf_page->GetPageId(), true);
   }
-  LOG_INFO("MaxSize() %d GetSize() %d\n", leaf_page->GetMaxSize(), leaf_page->GetSize());
   buffer_pool_manager_->UnpinPage(leaf_page->GetPageId(), true);
   return true;
 }
@@ -215,10 +213,8 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node, const KeyType &ke
   // 给new_node添加parent_id
   new_node->SetParentPageId(pnode->GetPageId());
   // 递归分裂，internal page本身第一位的key为空占一个size，因此不用>=
-  if (newsz > pnode->GetMaxSize()) {
-    // BUG wait fix 2022年8月13日00:20:55
+  if (newsz >= pnode->GetMaxSize()) {
     InternalPage *new_pnode = Split(pnode);
-    // Internal Page key(1)才是第一个值
     InsertIntoParent(pnode, new_pnode->KeyAt(0), new_pnode, transaction);
     buffer_pool_manager_->UnpinPage(new_pnode->GetPageId(), true);
   }
@@ -236,7 +232,24 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node, const KeyType &ke
  * necessary.
  */
 INDEX_TEMPLATE_ARGUMENTS
-void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {}
+void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {
+  if (IsEmpty()) {
+    return;
+  }
+  auto leaf_page = FindLeafPage(key);
+  LeafPage *leaf_node = reinterpret_cast<LeafPage *>(leaf_page->GetData());
+  int old_size = leaf_node->GetSize();
+  int new_size = leaf_node->RemoveAndDeleteRecord(key, comparator_);
+  if (old_size == new_size) {
+    // 删除失败
+    buffer_pool_manager_->UnpinPage(leaf_node->GetPageId(), true);
+    return;
+  }
+  // 删除成功
+  CoalesceOrRedistribute(leaf_node, transaction);
+
+  buffer_pool_manager_->UnpinPage(leaf_node->GetPageId(), true);
+}
 
 /*
  * User needs to first find the sibling of input page. If sibling's size + input
@@ -248,7 +261,43 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {}
 INDEX_TEMPLATE_ARGUMENTS
 template <typename N>
 bool BPLUSTREE_TYPE::CoalesceOrRedistribute(N *node, Transaction *transaction) {
-  return false;
+  // 处理根节点被Delete后,并且根节点情况与leaf和internal不同，不必满足size<min_size
+  if (node->IsRootPage()) {
+    return AdjustRoot(node);
+  }
+  // 处理叶节点或中间节点
+  // 是否需要满足size<min_size
+  if (node->GetSize() >= node->GetMinSize()) {
+    return false;
+  }
+  // 需要重新分配或合并
+  auto parent_page = buffer_pool_manager_->FetchPage(node->GetParentPageId());
+  InternalPage *parent_node = reinterpret_cast<InternalPage *>(parent_page->GetData());
+  // 找一个兄弟节点
+  int index = parent_node->ValueIndex(node->GetPageId());
+  int neighbor_index = index == 0 ? 1 : index - 1;
+  auto neighbor_id = parent_node->ValueAt(neighbor_index);
+  auto neighbor_page = buffer_pool_manager_->FetchPage(neighbor_id);
+  N *neighbor_node = reinterpret_cast<N *>(neighbor_page->GetData());
+
+  // 重新分配,因为最小值=最大值/2，所以当node的size小于最小值时,需要满足
+  // sibling's size + input* page's size >= page's max size
+  // >=的原因是假设max_size=4,min_size=2,leaf当size为4时就需要分裂，而当
+  // neighbor_node size=3,node size=1时,若选择 > 会导致进入合并操作，而合并后size=4，
+  // 但却没有分裂，导致key数量溢出
+  bool target_be_deleted = false;
+  if (neighbor_node->GetSize() + node->GetSize() > node->GetMaxSize()) {
+    Redistribute(neighbor_node, node, index);
+  } else {
+    // 合并
+    Coalesce(&neighbor_node, &node, &parent_node, index, transaction);
+    target_be_deleted = true;
+  }
+
+  buffer_pool_manager_->UnpinPage(parent_node->GetPageId(), true);
+  buffer_pool_manager_->UnpinPage(neighbor_node->GetPageId(), true);
+
+  return target_be_deleted;
 }
 
 /*
@@ -268,7 +317,38 @@ template <typename N>
 bool BPLUSTREE_TYPE::Coalesce(N **neighbor_node, N **node,
                               BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator> **parent, int index,
                               Transaction *transaction) {
-  return false;
+  // 由于需要保证key的顺序，因此无论neighbor_node是node的左或右兄弟
+  // 都是neighbor_node合并到node中
+  if ((*node)->IsLeafPage()) {
+    LeafPage *leaf_node = reinterpret_cast<LeafPage *>(*node);
+    LeafPage *leaf_neighbor_node = reinterpret_cast<LeafPage *>(*neighbor_node);
+    if (index == 0) {
+      // neighbor在node右边
+      leaf_neighbor_node->MoveAllTo(leaf_node);
+      leaf_node->SetNextPageId(leaf_neighbor_node->GetNextPageId());
+      (*parent)->Remove(1);
+    } else {
+      // neighbor在node左边
+      leaf_node->MoveAllTo(leaf_neighbor_node);
+      leaf_neighbor_node->SetNextPageId(leaf_node->GetNextPageId());
+      (*parent)->Remove(index);
+    }
+
+  } else {
+    InternalPage *internal_node = reinterpret_cast<InternalPage *>(*node);
+    InternalPage *internal_neighbor_node = reinterpret_cast<InternalPage *>(*neighbor_node);
+    if (index == 0) {
+      // neighbor在node右边
+      internal_neighbor_node->MoveAllTo(internal_node, (*parent)->KeyAt(1), buffer_pool_manager_);
+      (*parent)->Remove(1);
+    } else {
+      // neighbor在node左边
+      internal_node->MoveAllTo(internal_neighbor_node, (*parent)->KeyAt(index), buffer_pool_manager_);
+      (*parent)->Remove(index);
+    }
+  }
+
+  return CoalesceOrRedistribute((*parent), transaction);
 }
 
 /*
@@ -282,7 +362,39 @@ bool BPLUSTREE_TYPE::Coalesce(N **neighbor_node, N **node,
  */
 INDEX_TEMPLATE_ARGUMENTS
 template <typename N>
-void BPLUSTREE_TYPE::Redistribute(N *neighbor_node, N *node, int index) {}
+void BPLUSTREE_TYPE::Redistribute(N *neighbor_node, N *node, int index) {
+  // 从兄弟节点拿一个节点过来
+  // index==0 则说明neighbor_node是node后继节点，即node是第一个node所以只能向右兄弟拿
+  Page *p_page = buffer_pool_manager_->FetchPage(node->GetParentPageId());
+  InternalPage *p_node = reinterpret_cast<InternalPage *>(p_page->GetData());
+  if (node->IsLeafPage()) {
+    LeafPage *node_leaf = reinterpret_cast<LeafPage *>(node);
+    LeafPage *neighbor_leaf = reinterpret_cast<LeafPage *>(neighbor_node);
+
+    if (index == 0) {
+      // move sibling page's first key & value pair into end of input "node"
+      neighbor_leaf->MoveFirstToEndOf(node_leaf);
+      // change parent keys
+      // node是第一个node所以只能向右兄弟拿
+      p_node->SetKeyAt(1, neighbor_leaf->KeyAt(0));
+    } else {
+      neighbor_leaf->MoveLastToFrontOf(node_leaf);
+      p_node->SetKeyAt(index, node_leaf->KeyAt(0));
+    }
+  } else {
+    InternalPage *node_internal = reinterpret_cast<InternalPage *>(node);
+    InternalPage *neighbor_internal = reinterpret_cast<InternalPage *>(neighbor_node);
+    if (index == 0) {
+      neighbor_internal->MoveFirstToEndOf(node_internal, p_node->KeyAt(1), buffer_pool_manager_);
+      p_node->SetKeyAt(1, neighbor_internal->KeyAt(0));
+    } else {
+      neighbor_internal->MoveLastToFrontOf(node_internal, p_node->KeyAt(index), buffer_pool_manager_);
+      p_node->SetKeyAt(index, node_internal->KeyAt(0));
+    }
+  }
+
+  buffer_pool_manager_->UnpinPage(p_node->GetPageId(), true);
+}
 /*
  * Update root page if necessary
  * NOTE: size of root page can be less than min size and this method is only
@@ -294,7 +406,30 @@ void BPLUSTREE_TYPE::Redistribute(N *neighbor_node, N *node, int index) {}
  * happend
  */
 INDEX_TEMPLATE_ARGUMENTS
-bool BPLUSTREE_TYPE::AdjustRoot(BPlusTreePage *old_root_node) { return false; }
+bool BPLUSTREE_TYPE::AdjustRoot(BPlusTreePage *old_root_node) {
+  // case1 old_root_node是internal,将仅剩的一个child更新为root
+  if ((!old_root_node->IsLeafPage()) && old_root_node->GetSize() == 1) {
+    InternalPage *old_root_internal = reinterpret_cast<InternalPage *>(old_root_node);
+    page_id_t new_root_pid = old_root_internal->ValueAt(0);
+
+    root_page_id_ = new_root_pid;
+    UpdateRootPageId(0);
+
+    Page *new_root_page = buffer_pool_manager_->FetchPage(new_root_pid);
+    InternalPage *new_root_internal = reinterpret_cast<InternalPage *>(new_root_page->GetData());
+    new_root_internal->SetParentPageId(INVALID_PAGE_ID);
+
+    return true;
+  }
+  // case2 old_root_node是leaf
+  if (old_root_node->IsLeafPage() && old_root_node->GetSize() == 0) {
+    root_page_id_ = INVALID_PAGE_ID;
+    UpdateRootPageId(0);
+    return true;
+  }
+
+  return false;
+}
 
 /*****************************************************************************
  * INDEX ITERATOR
@@ -305,7 +440,11 @@ bool BPLUSTREE_TYPE::AdjustRoot(BPlusTreePage *old_root_node) { return false; }
  * @return : index iterator
  */
 INDEX_TEMPLATE_ARGUMENTS
-INDEXITERATOR_TYPE BPLUSTREE_TYPE::begin() { return INDEXITERATOR_TYPE(); }
+INDEXITERATOR_TYPE BPLUSTREE_TYPE::begin() {
+  auto page = FindLeafPage(KeyType(), true);
+  auto node = reinterpret_cast<LeafPage *>(page->GetData());
+  return INDEXITERATOR_TYPE(node, 0, buffer_pool_manager_);
+}
 
 /*
  * Input parameter is low key, find the leaf page that contains the input key
@@ -313,7 +452,12 @@ INDEXITERATOR_TYPE BPLUSTREE_TYPE::begin() { return INDEXITERATOR_TYPE(); }
  * @return : index iterator
  */
 INDEX_TEMPLATE_ARGUMENTS
-INDEXITERATOR_TYPE BPLUSTREE_TYPE::Begin(const KeyType &key) { return INDEXITERATOR_TYPE(); }
+INDEXITERATOR_TYPE BPLUSTREE_TYPE::Begin(const KeyType &key) {
+  auto page = FindLeafPage(key);
+  LeafPage *node = reinterpret_cast<LeafPage *>(page->GetData());
+  int index = node->KeyIndex(key, comparator_);
+  return INDEXITERATOR_TYPE(node, index, buffer_pool_manager_);
+}
 
 /*
  * Input parameter is void, construct an index iterator representing the end
@@ -321,7 +465,12 @@ INDEXITERATOR_TYPE BPLUSTREE_TYPE::Begin(const KeyType &key) { return INDEXITERA
  * @return : index iterator
  */
 INDEX_TEMPLATE_ARGUMENTS
-INDEXITERATOR_TYPE BPLUSTREE_TYPE::end() { return INDEXITERATOR_TYPE(); }
+INDEXITERATOR_TYPE BPLUSTREE_TYPE::end() {
+  auto page = FindLeafPageEx(KeyType(), FindOp::RightMost);
+  LeafPage *node = reinterpret_cast<LeafPage *>(page->GetData());
+  int index = node->GetSize();
+  return INDEXITERATOR_TYPE(node, index, buffer_pool_manager_);
+}
 
 /*****************************************************************************
  * UTILITIES AND DEBUG
@@ -333,6 +482,14 @@ INDEXITERATOR_TYPE BPLUSTREE_TYPE::end() { return INDEXITERATOR_TYPE(); }
 
 INDEX_TEMPLATE_ARGUMENTS
 Page *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key, bool leftMost) {
+  if (leftMost) {
+    return FindLeafPageEx(key, FindOp::LeftMost);
+  }
+  return FindLeafPageEx(key, FindOp::None);
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+Page *BPLUSTREE_TYPE::FindLeafPageEx(const KeyType &key, FindOp op) {
   // throw Exception(ExceptionType::NOT_IMPLEMENTED, "Implement this for test");
   if (IsEmpty()) {
     return nullptr;
@@ -346,10 +503,19 @@ Page *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key, bool leftMost) {
     InternalPage *in_node = reinterpret_cast<InternalPage *>(node);
     auto next_pid = INVALID_PAGE_ID;
     // 查找leaf方式
-    if (leftMost) {
-      next_pid = in_node->ValueAt(0);
-    } else {
-      next_pid = in_node->Lookup(key, comparator_);
+    switch (op) {
+      case FindOp::None:
+        next_pid = in_node->Lookup(key, comparator_);
+        break;
+      case FindOp::LeftMost:
+        next_pid = in_node->ValueAt(0);
+        break;
+      case FindOp::RightMost:
+        next_pid = in_node->ValueAt(in_node->GetSize() - 1);
+        break;
+      default:
+        throw std::runtime_error("FindLeafPageEx: error enum type");
+        break;
     }
     assert(next_pid != INVALID_PAGE_ID);
 

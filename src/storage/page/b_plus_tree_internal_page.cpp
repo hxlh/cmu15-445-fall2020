@@ -138,7 +138,8 @@ int B_PLUS_TREE_INTERNAL_PAGE_TYPE::InsertNodeAfter(const ValueType &old_value, 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveHalfTo(BPlusTreeInternalPage *recipient,
                                                 BufferPoolManager *buffer_pool_manager) {
-  auto start = GetMinSize() + 1;
+  // 这里无需加1，因为此时size==max_size+1
+  auto start = GetMinSize();
   auto item = &array[start];
   auto size = GetSize() - start;
   recipient->CopyNFrom(item, size, buffer_pool_manager);
@@ -173,10 +174,10 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyNFrom(MappingType *items, int size, Buf
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Remove(int index) {
-  IncreaseSize(-1);
-  for (int i = index; i < GetSize(); i++) {
+  for (int i = index; i < GetSize() - 1; i++) {
     array[i] = array[i + 1];
   }
+  IncreaseSize(-1);
 }
 
 /*

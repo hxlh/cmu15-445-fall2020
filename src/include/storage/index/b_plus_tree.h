@@ -78,6 +78,9 @@ class BPlusTree {
   void RemoveFromFile(const std::string &file_name, Transaction *transaction = nullptr);
   // expose for test purpose
   Page *FindLeafPage(const KeyType &key, bool leftMost = false);
+  // 扩展版本
+  enum FindOp { LeftMost, RightMost, None };
+  Page *FindLeafPageEx(const KeyType &key, FindOp op = FindOp::None);
 
  private:
   void StartNewTree(const KeyType &key, const ValueType &value);
