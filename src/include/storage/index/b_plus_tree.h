@@ -22,7 +22,8 @@
 namespace bustub {
 
 #define BPLUSTREE_TYPE BPlusTree<KeyType, ValueType, KeyComparator>
-
+enum FindOp { LeftMost, RightMost, None };
+enum UsedOp { SEARCH, INSERT, DELETE };
 /**
  * Main class providing the API for the Interactive B+ Tree.
  *
@@ -32,6 +33,10 @@ namespace bustub {
  * (2) support insert & remove
  * (3) The structure should shrink and grow dynamically
  * (4) Implement index iterator for range scan
+ *
+ * // lab add
+ * NOTE:leaf插入采取 >= MaxSize()时分裂，删除时<MinSize重新分配或合并
+ * internal 插入采取 > MaxSize()时分裂（因为第一个key为空），删除时<MinSize重新分配或合并
  */
 INDEX_TEMPLATE_ARGUMENTS
 class BPlusTree {
@@ -79,29 +84,29 @@ class BPlusTree {
   // expose for test purpose
   Page *FindLeafPage(const KeyType &key, bool leftMost = false);
   // 扩展版本
-  enum FindOp { LeftMost, RightMost, None };
-  Page *FindLeafPageEx(const KeyType &key, FindOp op = FindOp::None);
+  bool FindLeafPageEx(Page **out_page, const KeyType &key, FindOp op = FindOp::None, UsedOp used_op = UsedOp::SEARCH,
+                      Transaction *transaction = nullptr);
 
  private:
   void StartNewTree(const KeyType &key, const ValueType &value);
 
   bool InsertIntoLeaf(const KeyType &key, const ValueType &value, Transaction *transaction = nullptr);
 
-  void InsertIntoParent(BPlusTreePage *old_node, const KeyType &key, BPlusTreePage *new_node,
+  void InsertIntoParent(BPlusTreePage *old_node, const KeyType &key, BPlusTreePage *new_node, bool *root_locked,
                         Transaction *transaction = nullptr);
 
   template <typename N>
   N *Split(N *node);
 
   template <typename N>
-  bool CoalesceOrRedistribute(N *node, Transaction *transaction = nullptr);
+  bool CoalesceOrRedistribute(N *node, bool *root_locked, Transaction *transaction = nullptr);
 
   template <typename N>
   bool Coalesce(N **neighbor_node, N **node, BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator> **parent,
-                int index, Transaction *transaction = nullptr);
+                int index, bool *root_locked, Transaction *transaction = nullptr);
 
   template <typename N>
-  void Redistribute(N *neighbor_node, N *node, int index);
+  void Redistribute(N *neighbor_node, N *node, int index, bool *root_locked, Transaction *transaction);
 
   bool AdjustRoot(BPlusTreePage *node);
 
@@ -112,6 +117,8 @@ class BPlusTree {
 
   void ToString(BPlusTreePage *page, BufferPoolManager *bpm) const;
 
+  template <typename N>
+  bool IsSafe(N *node, UsedOp op);
   // member variable
   std::string index_name_;
   page_id_t root_page_id_;
@@ -119,6 +126,7 @@ class BPlusTree {
   KeyComparator comparator_;
   int leaf_max_size_;
   int internal_max_size_;
+  std::mutex root_latch_;
 };
 
 }  // namespace bustub

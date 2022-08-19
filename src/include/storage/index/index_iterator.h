@@ -25,7 +25,7 @@ class IndexIterator {
 
  public:
   // you may define your own constructor based on your member variables
-  IndexIterator(LeafPage *page, int index, BufferPoolManager *buffer_manager);
+  IndexIterator(Page *page, int index, BufferPoolManager *buffer_manager);
   ~IndexIterator();
 
   bool isEnd();
@@ -35,16 +35,17 @@ class IndexIterator {
   IndexIterator &operator++();
 
   bool operator==(const IndexIterator &itr) const {
-    return (page_->GetPageId() == itr.page_->GetPageId() && index_ == itr.index_);
+    return (node_->GetPageId() == itr.node_->GetPageId() && index_ == itr.index_);
   }
 
   bool operator!=(const IndexIterator &itr) const {
-    return !(page_->GetPageId() == itr.page_->GetPageId() && index_ == itr.index_);
+    return !(node_->GetPageId() == itr.node_->GetPageId() && index_ == itr.index_);
   }
 
  private:
   // add your own private member variables here
-  LeafPage *page_;
+  Page *page_;
+  LeafPage *node_;
   int index_;
   BufferPoolManager *buffer_manager_;
 };

@@ -147,6 +147,8 @@ TEST(BPlusTreeTests, DeleteTest2) {
     index_key.SetFromInteger(key);
     tree.Remove(index_key, transaction);
   }
+  auto filename = "m.dot";
+  tree.Draw(bpm, filename);
 
   start_key = 2;
   current_key = start_key;
