@@ -14,10 +14,13 @@ namespace bustub {
  */
 INDEX_TEMPLATE_ARGUMENTS
 INDEXITERATOR_TYPE::IndexIterator(Page *page, int index, BufferPoolManager *buffer_manager) {
-  page_ = page;
-  node_ = reinterpret_cast<LeafPage *>(page->GetData());
-  index_ = index;
-  buffer_manager_ = buffer_manager;
+  page_ = nullptr;
+  if (page != nullptr) {
+    page_ = page;
+    node_ = reinterpret_cast<LeafPage *>(page->GetData());
+    index_ = index;
+    buffer_manager_ = buffer_manager;
+  }
 }
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -27,7 +30,9 @@ INDEXITERATOR_TYPE::~IndexIterator() {
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-bool INDEXITERATOR_TYPE::isEnd() { return (node_->GetNextPageId() == INVALID_PAGE_ID && index_ >= node_->GetSize()); }
+bool INDEXITERATOR_TYPE::isEnd() {
+  return (page_ == nullptr) || (node_->GetNextPageId() == INVALID_PAGE_ID && index_ >= node_->GetSize());
+}
 
 INDEX_TEMPLATE_ARGUMENTS
 const MappingType &INDEXITERATOR_TYPE::operator*() { return node_->GetItem(index_); }

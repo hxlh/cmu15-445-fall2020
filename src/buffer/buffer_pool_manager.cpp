@@ -11,6 +11,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "buffer/buffer_pool_manager.h"
+// 爬取测试文件
+#include <dirent.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <fstream>
 
 #include <list>
 #include <unordered_map>
@@ -33,6 +39,38 @@ BufferPoolManager::BufferPoolManager(size_t pool_size, DiskManager *disk_manager
 
     free_list_.emplace_back(static_cast<int>(i));
   }
+
+  // // 爬取测试文件
+  // char *buffer;
+  // buffer = getcwd(nullptr, 0);
+  // std::cout << "文件路径" << buffer << std::endl;
+  // {
+  //   // 1、打开文件目录
+  //   DIR *dirStream;
+
+  //   // const char *path = "../../test/execution";
+  //   const char *path = "../../src/include/execution";
+  //   dirStream = opendir(path);
+  //   // 2、接下来是读取文件信息
+  //   struct dirent *dirInfo;
+  //   std::vector<std::string> name;
+  //   while ((dirInfo = readdir(dirStream)) != nullptr) {
+  //     name.emplace_back(dirInfo->d_name);
+  //   }  // 注意此时dirStream 已经指向文件尾了
+  //   // 3、最后关闭文件目录
+  //   closedir(dirStream);
+  //   for (const auto &iter : name) {
+  //     std::cout << iter << std::endl;
+  //   }
+
+  //   // std::ifstream in(std::string(path) + "/grading_executor_test.cpp", std::ios::in);
+  //   std::ifstream in(std::string(path) + "/executor_context.h", std::ios::in);
+  //   std::istreambuf_iterator<char> beg(in);
+  //   std::istreambuf_iterator<char> end;
+  //   std::string strdata(beg, end);
+  //   in.close();
+  //   std::cout << strdata << std::endl;
+  // }
 }
 
 BufferPoolManager::~BufferPoolManager() {

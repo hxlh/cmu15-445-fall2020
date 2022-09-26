@@ -77,14 +77,28 @@ class Catalog {
    */
   TableMetadata *CreateTable(Transaction *txn, const std::string &table_name, const Schema &schema) {
     BUSTUB_ASSERT(names_.count(table_name) == 0, "Table names should be unique!");
-    return nullptr;
+
+    auto oid = next_table_oid_.load();
+    next_table_oid_++;
+
+    auto table_heap = new TableHeap(bpm_, lock_manager_, log_manager_, txn);
+    auto table_meta = new TableMetadata(schema, table_name, std::unique_ptr<TableHeap>(table_heap), oid);
+
+    // 维护hash table
+    tables_[oid] = std::unique_ptr<TableMetadata>(table_meta);
+    names_[table_name] = oid;
+
+    return table_meta;
   }
 
   /** @return table metadata by name */
-  TableMetadata *GetTable(const std::string &table_name) { return nullptr; }
+  TableMetadata *GetTable(const std::string &table_name) {
+    auto table_oid = names_.at(table_name);
+    return GetTable(table_oid);
+  }
 
   /** @return table metadata by oid */
-  TableMetadata *GetTable(table_oid_t table_oid) { return nullptr; }
+  TableMetadata *GetTable(table_oid_t table_oid) { return tables_.at(table_oid).get(); }
 
   /**
    * Create a new index, populate existing data of the table and return its metadata.
@@ -101,14 +115,43 @@ class Catalog {
   IndexInfo *CreateIndex(Transaction *txn, const std::string &index_name, const std::string &table_name,
                          const Schema &schema, const Schema &key_schema, const std::vector<uint32_t> &key_attrs,
                          size_t keysize) {
-    return nullptr;
+    auto index_oid = next_index_oid_.load();
+    next_index_oid_++;
+
+    auto index_meta = new IndexMetadata(index_name, table_name, &schema, key_attrs);
+    std::unique_ptr<Index> index(new BPlusTreeIndex<KeyType, ValueType, KeyComparator>(index_meta, bpm_));
+    auto index_info = new IndexInfo(key_schema, index_name, std::move(index), index_oid, table_name, keysize);
+
+    // 为table的每个Tuple创建索引
+    auto table = GetTable(table_name)->table_.get();
+    for (auto iter = table->Begin(txn); iter != table->End(); iter++) {
+      auto tuple = iter->KeyFromTuple(schema, key_schema, key_attrs);
+      index_info->index_->InsertEntry(tuple, iter->GetRid(), txn);
+    }
+
+    indexes_[index_oid] = std::unique_ptr<IndexInfo>(index_info);
+    index_names_[table_name][index_name] = index_oid;
+    return indexes_[index_oid].get();
   }
 
-  IndexInfo *GetIndex(const std::string &index_name, const std::string &table_name) { return nullptr; }
+  IndexInfo *GetIndex(const std::string &index_name, const std::string &table_name) {
+    auto index_oid = index_names_.at(table_name).at(index_name);
+    return GetIndex(index_oid);
+  }
 
-  IndexInfo *GetIndex(index_oid_t index_oid) { return nullptr; }
+  IndexInfo *GetIndex(index_oid_t index_oid) { return &(*indexes_[index_oid]); }
 
-  std::vector<IndexInfo *> GetTableIndexes(const std::string &table_name) { return std::vector<IndexInfo *>(); }
+  std::vector<IndexInfo *> GetTableIndexes(const std::string &table_name) {
+    std::vector<IndexInfo *> res;
+    auto &m = index_names_[table_name];
+
+    for (auto &iter : m) {
+      auto index_iter = indexes_.find(iter.second);
+      auto info = &(*index_iter->second);
+      res.push_back(info);
+    }
+    return res;
+  }
 
  private:
   [[maybe_unused]] BufferPoolManager *bpm_;

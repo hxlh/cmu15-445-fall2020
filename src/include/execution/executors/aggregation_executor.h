@@ -26,6 +26,23 @@
 #include "storage/table/tuple.h"
 #include "type/value_factory.h"
 
+/** 考虑: SELECT COUNT(col1),COUNT(col2),... FROM ...语句
+ * plan_->GetGroupBys()->std::vector<const bustub::AbstractExpression *>获取计算key的对应表达式，并且用于按表达式分组
+ * plan_->GetAggregates()->std::vector<const bustub::AbstractExpression *>获取计算value对应表达式
+ * plan_->GetAggregateTypes()->std::vector<bustub::AggregationType>获取表达式的类型(COUNT/SUM/MAX/MIN)
+ * SimpleAggregationHashTable辅助类利用上面的数据进行初始化
+ * 我们将child_executor返回的tuple通过MakeKey和MakeValue构造key,value传入InsertCombine进行聚合计算
+ * // 例如传入一个Tuple包含(col1,col2,...)
+ * 进行MakeKey时：表达式1获取col1,表达式2获取col2...构建一个std::vector<Value>keys
+ * 进行MakeKey时：表达式1获取col1的值,表达式2获取col2值...构建一个std::vector<Value>values
+ * 第一次执行InsertCombine：std::unordered_map<AggregateKey, AggregateValue> ht{}为空，
+ * 为ht[keys](COUNT(col1),COUNT(col2))创建一组初始值
+ * GenerateInitialAggregateValue()中根据这次要执行的聚类函数类型agg_types创建初始值COUNT(col1)->0,COUNT(col2)->0,...
+ * 第二次执行第一次执行InsertCombine：取出以(COUNT(col1),COUNT(col2)...)为key的values，进行聚合计算
+ *
+ * 注：ht是一个以列名向量为key，以每一列所执行的聚合函数的值为value的hash table
+ */
+
 namespace bustub {
 /**
  * A simplified hash table that has all the necessary functionality for aggregations.
@@ -41,6 +58,7 @@ class SimpleAggregationHashTable {
                              const std::vector<AggregationType> &agg_types)
       : agg_exprs_{agg_exprs}, agg_types_{agg_types} {}
 
+  // 为每个聚合函数产生一个初始化值
   /** @return the initial aggregrate value for this aggregation executor */
   AggregateValue GenerateInitialAggregateValue() {
     std::vector<Value> values;
@@ -66,7 +84,7 @@ class SimpleAggregationHashTable {
     }
     return {values};
   }
-
+  // 执行聚合操作
   /** Combines the input into the aggregation result. */
   void CombineAggregateValues(AggregateValue *result, const AggregateValue &input) {
     for (uint32_t i = 0; i < agg_exprs_.size(); i++) {
@@ -100,6 +118,7 @@ class SimpleAggregationHashTable {
     if (ht.count(agg_key) == 0) {
       ht.insert({agg_key, GenerateInitialAggregateValue()});
     }
+    // 计算聚合
     CombineAggregateValues(&ht[agg_key], agg_val);
   }
 
@@ -171,7 +190,7 @@ class AggregationExecutor : public AbstractExecutor {
   void Init() override;
 
   bool Next(Tuple *tuple, RID *rid) override;
-
+  // 为每个表达式提取需要的key
   /** @return the tuple as an AggregateKey */
   AggregateKey MakeKey(const Tuple *tuple) {
     std::vector<Value> keys;
@@ -180,7 +199,7 @@ class AggregationExecutor : public AbstractExecutor {
     }
     return {keys};
   }
-
+  // 为每个表达式提取需要的value
   /** @return the tuple as an AggregateValue */
   AggregateValue MakeVal(const Tuple *tuple) {
     std::vector<Value> vals;
@@ -197,7 +216,9 @@ class AggregationExecutor : public AbstractExecutor {
   std::unique_ptr<AbstractExecutor> child_;
   /** Simple aggregation hash table. */
   // Uncomment me! SimpleAggregationHashTable aht_;
+  SimpleAggregationHashTable aht_;
   /** Simple aggregation hash table iterator. */
   // Uncomment me! SimpleAggregationHashTable::Iterator aht_iterator_;
+  SimpleAggregationHashTable::Iterator aht_iterator_;
 };
 }  // namespace bustub
