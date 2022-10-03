@@ -32,8 +32,30 @@ void AggregationExecutor::Init() {
     Tuple tuple;
     RID rid;
     while (child_->Next(&tuple, &rid)) {
+      // lock
+      auto txn = exec_ctx_->GetTransaction();
+      auto isolation = txn->GetIsolationLevel();
+      if (isolation != IsolationLevel::READ_UNCOMMITTED) {
+        if ((!txn->IsSharedLocked(rid) && (!txn->IsExclusiveLocked(rid)))) {
+          exec_ctx_->GetLockManager()->LockShared(txn, rid);
+        }
+      }
+
       // 计算聚合值
       aht_.InsertCombine(MakeKey(&tuple), MakeVal(&tuple));
+
+      // unlock
+      switch (isolation) {
+        case IsolationLevel::READ_UNCOMMITTED:
+          break;
+        case IsolationLevel::READ_COMMITTED:
+          if (txn->IsSharedLocked(rid)) {
+            exec_ctx_->GetLockManager()->Unlock(txn, rid);
+          }
+          break;
+        case IsolationLevel::REPEATABLE_READ:
+          break;
+      }
     }
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

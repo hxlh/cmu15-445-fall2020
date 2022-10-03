@@ -47,8 +47,8 @@ class ExecutionEngine {
         }
       }
     } catch (Exception &e) {
-      // TODO(student): handle exceptions
-      std::cout << e.what() << std::endl;
+      exec_ctx->GetTransactionManager()->Abort(exec_ctx->GetTransaction());
+      return false;
     }
 
     return true;

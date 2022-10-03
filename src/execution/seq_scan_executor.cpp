@@ -27,6 +27,25 @@ bool SeqScanExecutor::Next(Tuple *tuple, RID *rid) {
     return false;
   }
 
+  // lock
+  try {
+    auto txn = exec_ctx_->GetTransaction();
+    switch (txn->GetIsolationLevel()) {
+      case IsolationLevel::READ_UNCOMMITTED:
+
+        break;
+      case IsolationLevel::READ_COMMITTED:
+      case IsolationLevel::REPEATABLE_READ:
+        if (!txn->IsExclusiveLocked(table_iter_->GetRid())) {
+          exec_ctx_->GetLockManager()->LockShared(txn, table_iter_->GetRid());
+        }
+        break;
+    }
+  } catch (const std::exception &e) {
+    std::cerr << e.what() << '\n';
+    throw e;
+  }
+
   // 只获取想要的columns
   auto out_schema = plan_->OutputSchema();
   auto &out_columns = out_schema->GetColumns();
@@ -39,6 +58,21 @@ bool SeqScanExecutor::Next(Tuple *tuple, RID *rid) {
 
   auto oringal_rid = table_iter_->GetRid();
   auto tmp_tuple = Tuple(values, out_schema);
+
+  // unlock
+  auto txn = exec_ctx_->GetTransaction();
+  switch (txn->GetIsolationLevel()) {
+    case IsolationLevel::READ_UNCOMMITTED:
+
+      break;
+    case IsolationLevel::READ_COMMITTED:
+      if (txn->IsSharedLocked(table_iter_->GetRid())) {
+        exec_ctx_->GetLockManager()->Unlock(txn, table_iter_->GetRid());
+      }
+      break;
+    case IsolationLevel::REPEATABLE_READ:
+      break;
+  }
   table_iter_++;
 
   // 判断谓词（条件）是否满足，不满足则跳过该tuple，即只返回满足条件的元组

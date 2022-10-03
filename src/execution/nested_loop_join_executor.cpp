@@ -25,14 +25,27 @@ NestedLoopJoinExecutor::NestedLoopJoinExecutor(ExecutorContext *exec_ctx, const 
 void NestedLoopJoinExecutor::Init() {
   left_executor_->Init();
   right_executor_->Init();
-  // 先将right全部取出
-  Tuple tuple;
-  RID rid;
-  while (right_executor_->Next(&tuple, &rid)) {
-    right_tuples_.emplace_back(std::move(tuple));
+  try {
+    // 先将right全部取出
+    Tuple tuple;
+    RID rid;
+
+    while (right_executor_->Next(&tuple, &rid)) {
+      // lock right
+      auto txn = exec_ctx_->GetTransaction();
+      if (txn->GetIsolationLevel() != IsolationLevel::READ_UNCOMMITTED) {
+        if ((!txn->IsSharedLocked(rid)) && (!txn->IsExclusiveLocked(rid))) {
+          exec_ctx_->GetLockManager()->LockShared(txn, rid);
+        }
+      }
+
+      right_tuples_.emplace_back(std::move(tuple));
+    }
+    right_tuple_iter_ = right_tuples_.begin();
+    non_any_tuple_ = !left_executor_->Next(&left_tuple_, &left_rid_);
+  } catch (const std::exception &e) {
+    throw e;
   }
-  right_tuple_iter_ = right_tuples_.begin();
-  non_any_tuple_ = !left_executor_->Next(&left_tuple_, &left_rid_);
 }
 // 每次取出一个left_tuple与全部right_tuple比较
 bool NestedLoopJoinExecutor::Next(Tuple *tuple, RID *rid) {
@@ -41,6 +54,18 @@ bool NestedLoopJoinExecutor::Next(Tuple *tuple, RID *rid) {
     return false;
   }
   do {
+    // lock left
+    auto txn = exec_ctx_->GetTransaction();
+    try {
+      if (txn->GetIsolationLevel() != IsolationLevel::READ_UNCOMMITTED) {
+        if ((!txn->IsSharedLocked(left_rid_)) && (!txn->IsExclusiveLocked(left_rid_))) {
+          exec_ctx_->GetLockManager()->LockShared(txn, left_rid_);
+        }
+      }
+    } catch (const std::exception &e) {
+      throw e;
+    }
+
     while (right_tuple_iter_ != right_tuples_.end()) {
       if (plan_->Predicate()
               ->EvaluateJoin(&left_tuple_, left_executor_->GetOutputSchema(), &(*right_tuple_iter_),
@@ -65,6 +90,19 @@ bool NestedLoopJoinExecutor::Next(Tuple *tuple, RID *rid) {
       right_tuple_iter_++;
     }
     right_tuple_iter_ = right_tuples_.begin();
+
+    // unlock left
+    switch (txn->GetIsolationLevel()) {
+      case IsolationLevel::READ_UNCOMMITTED:
+        break;
+      case IsolationLevel::READ_COMMITTED:
+        if (txn->IsSharedLocked(left_rid_)) {
+          exec_ctx_->GetLockManager()->Unlock(txn, left_rid_);
+        }
+        break;
+      case IsolationLevel::REPEATABLE_READ:
+        break;
+    }
   } while (left_executor_->Next(&left_tuple_, &left_rid_));
 
   return false;

@@ -54,15 +54,38 @@ bool UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
       //       after_update_tuple.KeyFromTuple(table_info_->schema_, index->key_schema_, index->index_->GetKeyAttrs());
       //   index->index_->InsertEntry(a, *rid, exec_ctx_->GetTransaction());
       // }
+
+      // lock
+      auto txn = exec_ctx_->GetTransaction();
+      if (txn->GetIsolationLevel() != IsolationLevel::READ_UNCOMMITTED) {
+        if (txn->IsSharedLocked(*rid)) {
+          exec_ctx_->GetLockManager()->LockUpgrade(txn, *rid);
+        } else if (!txn->IsExclusiveLocked(*rid)) {
+          exec_ctx_->GetLockManager()->LockExclusive(txn, *rid);
+        }
+      }
+
       auto new_tuple = GenerateUpdatedTuple(*tuple);
       table_info_->table_->UpdateTuple(new_tuple, *rid, exec_ctx_->GetTransaction());
+
+      // add to set
+      // UpdateTuple中已加入WriteSet
+      // txn->GetWriteSet()->emplace_back(TableWriteRecord(*rid, WType::UPDATE, *tuple, &(*table_info_->table_)));
+
       for (auto index : indexs_) {
         index->index_->DeleteEntry((*tuple).KeyFromTuple(*child_executor_->GetOutputSchema(), index->key_schema_,
                                                          index->index_->GetKeyAttrs()),
                                    *rid, exec_ctx_->GetTransaction());
+
         index->index_->InsertEntry(
             new_tuple.KeyFromTuple(table_info_->schema_, index->key_schema_, index->index_->GetKeyAttrs()), *rid,
             exec_ctx_->GetTransaction());
+
+        auto r = IndexWriteRecord(*rid, table_info_->oid_, WType::DELETE, new_tuple, index->index_oid_,
+                                  exec_ctx_->GetCatalog());
+        // 竟然要单独赋值-_-
+        r.old_tuple_ = *tuple;
+        txn->GetIndexWriteSet()->emplace_back(r);
       }
     }
   } catch (Exception &e) {

@@ -60,11 +60,28 @@ void InsertExecutor::InsertTableAndIndexs(Tuple *tuple) {
   if (!success) {
     throw Exception(ExceptionType::OUT_OF_MEMORY, "InsertTuple out of memory");
   }
+  // lock
+  auto txn = exec_ctx_->GetTransaction();
+  try {
+    if (txn->GetIsolationLevel() != IsolationLevel::READ_UNCOMMITTED) {
+      exec_ctx_->GetLockManager()->LockExclusive(txn, rid);
+    }
+  } catch (const std::exception &e) {
+    throw e;
+  }
+
+  // add to set
+  // InsertTuple函数中已经将rid加入WriteSet，这里无需加入
+  // txn->GetWriteSet()->emplace_back(TableWriteRecord(rid, WType::INSERT, *tuple, &(*table_->table_)));
 
   for (auto index : indexs_) {
     // KeyFromTuple根据index生成一个tuple
     index->index_->InsertEntry(tuple->KeyFromTuple(table_->schema_, index->key_schema_, index->index_->GetKeyAttrs()),
                                rid, exec_ctx_->GetTransaction());
+
+    // add to set
+    txn->GetIndexWriteSet()->emplace_back(
+        IndexWriteRecord(rid, table_->oid_, WType::INSERT, *tuple, index->index_oid_, exec_ctx_->GetCatalog()));
   }
 }
 

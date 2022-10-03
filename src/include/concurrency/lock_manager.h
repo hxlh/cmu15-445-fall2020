@@ -17,6 +17,7 @@
 #include <list>
 #include <memory>
 #include <mutex>  // NOLINT
+#include <set>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -33,7 +34,7 @@ class TransactionManager;
  */
 class LockManager {
   enum class LockMode { SHARED, EXCLUSIVE };
-
+  // 无论加锁是否需要等待都先将request加入queue，成功加锁则将granted_=true
   class LockRequest {
    public:
     LockRequest(txn_id_t txn_id, LockMode lock_mode) : txn_id_(txn_id), lock_mode_(lock_mode), granted_(false) {}
@@ -101,6 +102,7 @@ class LockManager {
 
   /**
    * Release the lock held by the transaction.
+   * 该函数在事务Abort处理函数中会被多次调用，以释放所有的锁
    * @param txn the transaction releasing the lock, it should actually hold the lock
    * @param rid the RID that is locked by the transaction
    * @return true if the unlock is successful, false otherwise
@@ -118,7 +120,8 @@ class LockManager {
   /** Removes an edge from t1 -> t2. */
   void RemoveEdge(txn_id_t t1, txn_id_t t2);
 
-  /**
+  /** 
+   * 该函数负责清空wait_for_
    * Checks if the graph has a cycle, returning the newest transaction ID in the cycle if so.
    * @param[out] txn_id if the graph has a cycle, will contain the newest transaction ID
    * @return false if the graph has no cycle, otherwise stores the newest transaction ID in the cycle to txn_id
@@ -130,6 +133,12 @@ class LockManager {
 
   /** Runs cycle detection in the background. */
   void RunCycleDetection();
+
+ private:
+  /** 扫描并重新构建waits_for_
+   * 并且返回每个事务阻塞在哪个rid的锁上
+   */
+  std::unordered_map<txn_id_t, RID> ScanWaitingTxn();
 
  private:
   std::mutex latch_;

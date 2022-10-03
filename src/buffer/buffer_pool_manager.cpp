@@ -48,8 +48,7 @@ BufferPoolManager::BufferPoolManager(size_t pool_size, DiskManager *disk_manager
   //   // 1、打开文件目录
   //   DIR *dirStream;
 
-  //   // const char *path = "../../test/execution";
-  //   const char *path = "../../src/include/execution";
+  //   const char *path = "../../test/concurrency";
   //   dirStream = opendir(path);
   //   // 2、接下来是读取文件信息
   //   struct dirent *dirInfo;
@@ -63,13 +62,65 @@ BufferPoolManager::BufferPoolManager(size_t pool_size, DiskManager *disk_manager
   //     std::cout << iter << std::endl;
   //   }
 
-  //   // std::ifstream in(std::string(path) + "/grading_executor_test.cpp", std::ios::in);
-  //   std::ifstream in(std::string(path) + "/executor_context.h", std::ios::in);
-  //   std::istreambuf_iterator<char> beg(in);
-  //   std::istreambuf_iterator<char> end;
-  //   std::string strdata(beg, end);
-  //   in.close();
-  //   std::cout << strdata << std::endl;
+  //   {
+  //     std::cout << "grading_lock_manager_detection_test.cpp --------------------------" << std::endl;
+  //     std::ifstream in(std::string(path) + "/grading_lock_manager_detection_test.cpp", std::ios::in);
+  //     std::istreambuf_iterator<char> beg(in);
+  //     std::istreambuf_iterator<char> end;
+  //     std::string strdata(beg, end);
+  //     in.close();
+  //     std::cout << strdata << std::endl;
+  //   }
+
+  //   {
+  //     std::cout << "grading_lock_manager_2_test.cpp --------------------------" << std::endl;
+  //     std::ifstream in(std::string(path) + "/grading_lock_manager_2_test.cpp", std::ios::in);
+  //     std::istreambuf_iterator<char> beg(in);
+  //     std::istreambuf_iterator<char> end;
+  //     std::string strdata(beg, end);
+  //     in.close();
+  //     std::cout << strdata << std::endl;
+  //   }
+
+  //   {
+  //     std::cout << "grading_lock_manager_1_test.cpp --------------------------" << std::endl;
+  //     std::ifstream in(std::string(path) + "/grading_lock_manager_1_test.cpp", std::ios::in);
+  //     std::istreambuf_iterator<char> beg(in);
+  //     std::istreambuf_iterator<char> end;
+  //     std::string strdata(beg, end);
+  //     in.close();
+  //     std::cout << strdata << std::endl;
+  //   }
+
+  //   {
+  //     std::cout << "grading_lock_manager_3_test.cpp --------------------------" << std::endl;
+  //     std::ifstream in(std::string(path) + "/grading_lock_manager_3_test.cpp", std::ios::in);
+  //     std::istreambuf_iterator<char> beg(in);
+  //     std::istreambuf_iterator<char> end;
+  //     std::string strdata(beg, end);
+  //     in.close();
+  //     std::cout << strdata << std::endl;
+  //   }
+
+  //   {
+  //     std::cout << "grading_transaction_test.cpp --------------------------" << std::endl;
+  //     std::ifstream in(std::string(path) + "/grading_transaction_test.cpp", std::ios::in);
+  //     std::istreambuf_iterator<char> beg(in);
+  //     std::istreambuf_iterator<char> end;
+  //     std::string strdata(beg, end);
+  //     in.close();
+  //     std::cout << strdata << std::endl;
+  //   }
+
+  //   {
+  //     std::cout << "grading_rollback_test.cpp --------------------------" << std::endl;
+  //     std::ifstream in(std::string(path) + "/grading_rollback_test.cpp", std::ios::in);
+  //     std::istreambuf_iterator<char> beg(in);
+  //     std::istreambuf_iterator<char> end;
+  //     std::string strdata(beg, end);
+  //     in.close();
+  //     std::cout << strdata << std::endl;
+  //   }
   // }
 }
 
